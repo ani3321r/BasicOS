@@ -1,0 +1,138 @@
+src file:
+The "ORG" command tells the assembler to address everything
+relative to the address given.
+
+Every x86 processer 64bit, 32 bit always starts in a 16 bit
+architechture in the start for backward compatibility.
+
+The "HLT" command pauses the cpu until a interupt is made to
+the system
+
+Then we are creating a infinite loop using "JMP" so that the
+it doesn't goes out of halt 
+
+The "TIMES" operation just repeats the thing the number of times,
+as we need the last two bytes of 512 in the memory to include the
+end sequence we are subtracting the total memory needed in the whole
+operation from 510 and repeating to go to end sequence
+
+
+MAKEFIlE:
+Here we are making a image and a bin file using the main asm
+file in order to run the bootloader and we are finally using 
+qemu to test it using the command:
+make
+qemu-system-i386 -fda build/main.img
+
+/**************************************************************/
+
+For printing a message in bios:
+ds -> start address of the data segment
+es -> start address of the extra segment
+ss -> start address of the stack
+
+we are setting all to zero to get a consistent start point
+sp -> stack pointer
+LODSB -> loads single byte
+
+in the print_loop part we are OR'ing al,al so that when
+the string comes to an end returing 0, the loop will end
+then we are jumping to done_print
+
+0x0E -> Code used to print something to the screen
+0x10 -> Video interupt
+
+/***********************************************************/
+
+In the creation of a FAT12 Disk:
+Here we are segregating the kernal with the bootloader first
+having two new sections in the makefile for building both seperately.
+
+Then to create a FAT12 Disk the commands in the floppy sections is
+used, first of all we are building using the kernal and bootloader
+then we are allocating 512byte block size 2880 times 1.4mb floppy
+just filled with zeros.
+Then mkfs(make filesystem) is used.
+
+Basically in the kernal and bootloader files we have the same code
+as the src/main.asm, but we have to do some changes in the header of
+the bootloader/boot.asm file to be able to compatible with the FAT12.
+
+Output after make:
+nasm src/bootloader/boot.asm -f bin -o build/bootloader.bin
+nasm src/kernal/main.asm -f bin -o build/kernal.bin
+dd if=/dev/zero of=build/main.img bs=512 count=2880
+2880+0 records in
+2880+0 records out
+1474560 bytes (1.5 MB, 1.4 MiB) copied, 0.0050206 s, 294 MB/s
+mkfs.fat -F 12 -n "BASICOS" build/main.img
+mkfs.fat 4.2 (2021-01-31)
+dd if=build/bootloader.bin of=build/main.img conv=notrunc
+1+0 records in
+1+0 records out
+512 bytes copied, 0.000100413 s, 5.1 MB/s
+mcopy -i build/main.img build/kernal.bin "::kernal.bin"
+
+/********************************************************/
+
+Reading from disk in bios:
+The interupt(INT 13) is used for reading disk sectors. According to the
+INT 13 manual we are adding drive number, cylinder number, sector number,
+pointer to buffer etc in the main function, and then made a disk_read
+function to be called at the end of this portion.
+
+In the disk_read we are pushing all the required registers to the stack
+then calling the lba_to_chs to give the rest values of the INT 13.
+
+in order to check for the disk read we have to make the build image
+again and then open qemu in debug mode using:
+qemu-system-i386 -boot c -m 256 -hda build/main.img -s -S
+
+After that we have to open the hex editor(we are using jeex) to alter
+some data in the disk then use gdb.
+In gdb we have to first go to localhost:1234 which is default port for qemu
+using:
+target remote localhost:1234
+
+In gdb we need to break at *0x7c00 which is start of program(use br)
+we need to then continue and go upto the end of the last jump and break
+there and again continue, then we need to view the data in the register
+ebx, where the edited value will be found..
+
+/*********************************************************/
+
+Loading kernel from disk:
+In this process we have to first add the kernal details in the footer
+section of the bootloader, the kernal load segment has the address
+of the pointer where the kernal will be starting from.
+
+Then after the main we have to define the logic of reading kernel
+in fat12, it mainly consists of 4 segments
+* reserved segement -> 1 sector
+* file allocation table -> 9*2 = 18 sectors
+* root directory
+* data
+
+In the foundKernel block the 1st MOV command has di as the beginning
+of the kernel and +26 is the offset cluster.
+
+/**********************************************************/
+
+Implimenting puts with C and x86:
+In order to run c code we need a 16 bit very lightweight c compiler, here we are using
+open-watcom. We can install it into system using "snap" then we have to initialize
+the commands for it in the Makefile, like the file location and some flags such as:
+s -> remove stack overflow check protection
+wx -> warning level to max
+ms -> small memory module
+zl -> remove all libraries and references
+zq -> informational based messages
+
+Then we have to initialize a 16 bit linker and some asm flags.
+Modified the kernel portion a lot for the c and linker parts.
+
+
+After doing the steps we have to impliment all the files in the kernel directory, then if
+everything runs correctly, in the qemu we could see the message of the main.c file.
+
+/*************************************************************/
